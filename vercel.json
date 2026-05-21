@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/dashboard.js": {
+      "maxDuration": 20
+    }
+  },
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" }
+  ]
+}

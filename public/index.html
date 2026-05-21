@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dune Queue Activity PoC</title>
+  <style>
+    :root { font-family: Inter, Segoe UI, Arial, sans-serif; color: #17233c; background: #f4f6fb; }
+    body { margin: 0; }
+    header { padding: 20px 28px; background: #fff; border-bottom: 1px solid #d8deea; display: flex; justify-content: space-between; align-items: center; }
+    h1 { margin: 0; font-size: 22px; }
+    .sub { color: #5b677d; font-size: 13px; margin-top: 4px; }
+    main { padding: 24px 28px; }
+    .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+    button { border: 1px solid #2f5bea; background: #2f5bea; color: #fff; padding: 9px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    button:disabled { opacity: .6; cursor: default; }
+    .status { color: #5b677d; font-size: 13px; }
+    .error { color: #b00020; background: #fff1f3; border: 1px solid #ffd0d7; padding: 10px 12px; border-radius: 8px; margin-bottom: 18px; display: none; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .card { background: #fff; border: 1px solid #d8deea; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px rgba(20, 30, 55, .06); }
+    .card .label { color: #5b677d; font-size: 13px; }
+    .card .value { margin-top: 8px; font-size: 28px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #d8deea; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(20, 30, 55, .06); }
+    th, td { padding: 12px 10px; border-bottom: 1px solid #e6eaf2; text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; font-weight: 700; }
+    th { background: #f9fbff; color: #3b4760; font-size: 12px; text-transform: uppercase; letter-spacing: .02em; }
+    tr:last-child td { border-bottom: none; }
+    .good { color: #177245; font-weight: 700; }
+    .bad { color: #c3222e; font-weight: 700; }
+    .muted { color: #8a94a8; }
+    .small { font-size: 12px; color: #5b677d; margin-top: 14px; }
+    @media (max-width: 900px) { .table-wrap { overflow-x: auto; } header { align-items: flex-start; flex-direction: column; gap: 8px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Dune Queue Activity PoC</h1>
+      <div class="sub">Day-to-now queue activity dashboard, refreshed every 60 seconds.</div>
+    </div>
+    <div class="status" id="lastUpdated">Not loaded yet</div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <button id="refreshBtn">Refresh now</button>
+      <span class="status" id="loadingState"></span>
+    </div>
+    <div class="error" id="errorBox"></div>
+    <section class="cards" id="summaryCards"></section>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Queue</th>
+            <th>Waiting</th>
+            <th>Longest Waiting</th>
+            <th>Offered</th>
+            <th>Answer</th>
+            <th>Abandon</th>
+            <th>Service Level</th>
+            <th>Avg Handle</th>
+            <th>Avg Wait</th>
+            <th>Max Wait</th>
+            <th>On Queue</th>
+            <th>Off Queue</th>
+            <th>Interacting</th>
+            <th>Idle</th>
+          </tr>
+        </thead>
+        <tbody id="queueRows"></tbody>
+      </table>
+    </div>
+    <div class="small" id="intervalInfo"></div>
+  </main>
+<script>
+  const REFRESH_MS = 60000;
+  const fmtNumber = (v) => Number.isFinite(v) ? v.toLocaleString() : '-';
+  const fmtPercent = (v) => typeof v === 'number' ? `${Math.round(v * 100)}%` : '-';
+  const fmtDuration = (seconds) => {
+    if (!Number.isFinite(seconds)) return '-';
+    const s = Math.max(0, Math.round(seconds));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h) return `${h}h ${m}m ${sec}s`;
+    if (m) return `${m}m ${sec}s`;
+    return `${sec}s`;
+  };
+
+  function serviceLevelClass(value, target) {
+    if (typeof value !== 'number' || typeof target !== 'number') return '';
+    return value >= target ? 'good' : 'bad';
+  }
+
+  function sum(queues, field) {
+    return queues.reduce((acc, q) => acc + (Number.isFinite(q[field]) ? q[field] : 0), 0);
+  }
+
+  function avgWeighted(queues, numeratorField, denominatorField) {
+    // Not currently used; placeholder for future accurate aggregate ratios.
+    return null;
+  }
+
+  function render(data) {
+    const queues = data.queues || [];
+    const totalOffered = sum(queues, 'offered');
+    const totalAnswered = sum(queues, 'answered');
+    const totalAbandoned = sum(queues, 'abandoned');
+    const totalWaiting = sum(queues, 'waiting');
+
+    document.getElementById('summaryCards').innerHTML = `
+      <div class="card"><div class="label">Total Offered</div><div class="value">${fmtNumber(totalOffered)}</div></div>
+      <div class="card"><div class="label">Total Answered</div><div class="value">${fmtNumber(totalAnswered)}</div></div>
+      <div class="card"><div class="label">Total Abandoned</div><div class="value">${fmtNumber(totalAbandoned)}</div></div>
+      <div class="card"><div class="label">Currently Waiting</div><div class="value">${fmtNumber(totalWaiting)}</div></div>
+    `;
+
+    document.getElementById('queueRows').innerHTML = queues.map((q) => `
+      <tr>
+        <td>${q.name}</td>
+        <td>${fmtNumber(q.waiting)}</td>
+        <td>${fmtDuration(q.longestWaitingSeconds)}</td>
+        <td>${fmtNumber(q.offered)}</td>
+        <td>${fmtNumber(q.answered)}</td>
+        <td>${fmtNumber(q.abandoned)}</td>
+        <td class="${serviceLevelClass(q.serviceLevel, q.serviceLevelTarget)}">${fmtPercent(q.serviceLevel)} <span class="muted">/ ${fmtPercent(q.serviceLevelTarget)}</span></td>
+        <td>${fmtDuration(q.avgHandleSeconds)}</td>
+        <td>${fmtDuration(q.avgWaitSeconds)}</td>
+        <td>${fmtDuration(q.maxWaitSeconds)}</td>
+        <td>${fmtNumber(q.onQueue)}</td>
+        <td>${fmtNumber(q.offQueue)}</td>
+        <td>${fmtNumber(q.interacting)}</td>
+        <td>${fmtNumber(q.idle)}</td>
+      </tr>
+    `).join('');
+
+    document.getElementById('intervalInfo').textContent = `Interval: ${data.interval} | Time zone: ${data.timeZone}`;
+    document.getElementById('lastUpdated').textContent = `Last updated: ${new Date(data.generatedAt).toLocaleString()}`;
+  }
+
+  async function loadDashboard() {
+    const button = document.getElementById('refreshBtn');
+    const state = document.getElementById('loadingState');
+    const error = document.getElementById('errorBox');
+    button.disabled = true;
+    state.textContent = 'Loading...';
+    error.style.display = 'none';
+    try {
+      const response = await fetch('/api/dashboard');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      render(data);
+      state.textContent = 'Loaded';
+    } catch (e) {
+      error.textContent = e.message;
+      error.style.display = 'block';
+      state.textContent = 'Error';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  document.getElementById('refreshBtn').addEventListener('click', loadDashboard);
+  loadDashboard();
+  setInterval(loadDashboard, REFRESH_MS);
+</script>
+</body>
+</html>
